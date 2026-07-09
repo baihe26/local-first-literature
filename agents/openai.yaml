@@ -1,0 +1,4 @@
+interface:
+  display_name: "Local-First Literature"
+  short_description: "Index local papers, find gaps, then scan new literature"
+  default_prompt: "Use $local-first-literature to index my local papers, infer research gaps, deduplicate new search results, and produce a reading-priority report."

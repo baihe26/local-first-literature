@@ -1,0 +1,64 @@
+profile_name: environmental-photocatalysis-example
+language: en
+weekly_reading_capacity: 6
+
+research_object:
+  - photocatalytic materials for water purification
+  - composite membranes and heterojunction catalysts
+
+core_topics:
+  - photocatalysis
+  - water purification
+  - pollutant degradation
+  - photocatalytic membrane
+
+secondary_topics:
+  - heterojunction
+  - S-scheme
+  - Z-scheme
+  - charge transfer
+  - self-cleaning membrane
+
+mechanism_terms:
+  - radical trapping
+  - ESR
+  - EPR
+  - photocurrent
+  - electrochemical impedance
+  - photoluminescence
+  - band structure
+
+method_terms:
+  - XRD
+  - SEM
+  - TEM
+  - XPS
+  - EIS
+  - PL
+  - cycling stability
+  - degradation kinetics
+
+experiment_reference_needs:
+  - performance comparison and degradation kinetics
+  - active-species trapping and ESR evidence
+  - band-structure and charge-transfer mechanism chain
+  - membrane flux or self-cleaning tests
+
+gap_questions:
+  - Which papers provide a complete mechanism evidence chain?
+  - Which papers show reusable photocatalytic performance and stability tests?
+  - Which papers have strong figure organization for a materials manuscript?
+
+exclusion_topics:
+  - environmental monitoring without material synthesis
+  - review-only paper without reusable methods or figure logic
+
+must_track_journals:
+  - Applied Catalysis B: Environmental
+  - Chemical Engineering Journal
+  - Journal of Hazardous Materials
+  - ACS Catalysis
+
+nice_to_track_journals:
+  - Separation and Purification Technology
+  - Environmental Science & Technology

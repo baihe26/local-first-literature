@@ -1,0 +1,60 @@
+profile_name: biomaterials-hydrogel-example
+language: en
+weekly_reading_capacity: 5
+
+research_object:
+  - injectable or printable hydrogels for tissue repair
+  - stem-cell response to dynamic biomaterials
+
+core_topics:
+  - hydrogel
+  - biomaterial
+  - tissue regeneration
+  - controlled release
+
+secondary_topics:
+  - extracellular matrix
+  - stem cell mechanobiology
+  - wound healing
+  - vascularization
+
+mechanism_terms:
+  - mechanotransduction
+  - stress relaxation
+  - YAP
+  - integrin
+  - growth factor signaling
+
+method_terms:
+  - rheology
+  - live dead staining
+  - immunofluorescence
+  - qPCR
+  - ELISA
+  - animal model
+
+experiment_reference_needs:
+  - hydrogel formulation and crosslinking controls
+  - growth-factor release assay
+  - 3D cell culture readouts
+  - histology and immunostaining panels
+
+gap_questions:
+  - Which papers connect hydrogel mechanics to cell behavior?
+  - Which papers provide reusable release assay designs?
+  - Which papers show strong tissue-repair evidence chains?
+
+exclusion_topics:
+  - clinical trial without material design insight
+  - unrelated cancer biology
+
+must_track_journals:
+  - Nature Biomedical Engineering
+  - Nature Materials
+  - Advanced Materials
+  - Biomaterials
+  - Bioactive Materials
+
+nice_to_track_journals:
+  - Acta Biomaterialia
+  - Journal of Controlled Release

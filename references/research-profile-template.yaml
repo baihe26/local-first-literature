@@ -1,0 +1,64 @@
+# Local-first literature research profile template.
+# Public-safe example: copy to an ignored/private path before adding real project details.
+
+profile_name: example-project
+language: zh
+weekly_reading_capacity: 5
+
+research_object:
+  - target system or organism
+  - material, disease, algorithm, dataset, or study context
+
+core_topics:
+  - primary concept 1
+  - primary concept 2
+
+secondary_topics:
+  - adjacent concept 1
+  - adjacent concept 2
+
+mechanism_terms:
+  - pathway or theory term
+  - causal mechanism term
+
+method_terms:
+  - assay or measurement
+  - data analysis method
+  - model system
+
+experiment_reference_needs:
+  - protocol details
+  - controls
+  - quantitative readouts
+  - figure style or evidence chain
+
+gap_questions:
+  - What evidence is missing from the current project design?
+  - Which mechanism claims need stronger literature support?
+  - Which experiments need precedent, controls, or parameter choices?
+
+exclusion_topics:
+  - superficially related but irrelevant topic
+  - wrong organism or application area
+
+must_track_journals:
+  - Nature
+  - Science
+  - Cell
+  - Proceedings of the National Academy of Sciences
+
+nice_to_track_journals: []
+
+private_paths:
+  local_library_roots: []
+  project_design_files: []
+  output_root: ""
+
+scoring_weights:
+  topic_relevance: 0.28
+  gap_fill: 0.20
+  experiment_reusability: 0.16
+  mechanism_value: 0.14
+  novelty_against_local: 0.12
+  journal_year_signal: 0.06
+  evidence_richness: 0.04
