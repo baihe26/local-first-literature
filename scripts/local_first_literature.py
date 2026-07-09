@@ -977,10 +977,20 @@ def load_gap_map(path: Optional[Path]) -> Dict[str, Any]:
 
 def build_queries(profile: Dict[str, Any], gap_map: Dict[str, Any], max_queries: int) -> List[str]:
     queries: List[str] = []
+    for key in ("search_queries", "seed_queries", "fallback_queries"):
+        value = profile.get(key, [])
+        if isinstance(value, str):
+            queries.append(value)
+        else:
+            queries.extend(str(v) for v in value or [] if str(v).strip())
     for gap in gap_map.get("gaps", []):
         terms = gap.get("query_terms", [])
         if terms:
-            queries.append(" ".join(str(t) for t in terms[:6]))
+            useful_terms = [str(t) for t in terms if str(t).strip()]
+            if useful_terms:
+                queries.append(" ".join(useful_terms[:4]))
+            if len(useful_terms) >= 8:
+                queries.append(" ".join(useful_terms[3:8]))
     core = []
     for key in ("core_terms", "core_topics", "design_terms", "method_terms"):
         value = profile.get(key, [])
@@ -990,9 +1000,9 @@ def build_queries(profile: Dict[str, Any], gap_map: Dict[str, Any], max_queries:
             core.extend(value)
     core = [str(t) for t in core if str(t).strip()]
     if core:
-        queries.append(" ".join(core[:6]))
+        queries.append(" ".join(core[:4]))
     if len(core) >= 6:
-        queries.append(" ".join(core[3:9]))
+        queries.append(" ".join(core[3:7]))
     seen = set()
     unique = []
     for q in queries:
@@ -1153,7 +1163,7 @@ def score_candidates(index_path: Path, candidates_path: Path, profile_path: Path
     scored: List[Dict[str, Any]] = []
     for cand in candidates:
         dup_label, dup_sim, dup_path = classify_duplicate(cand, locals_)
-        text = " ".join(str(cand.get(k, "")) for k in ("title", "abstract", "journal", "query"))
+        text = " ".join(str(cand.get(k, "")) for k in ("title", "abstract", "journal"))
         topic = term_hit_score(profile_terms, text)
         gap = term_hit_score(gap_terms, text)
         mechanism = cue_score(MECHANISM_CUES, text)
