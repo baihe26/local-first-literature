@@ -1,5 +1,12 @@
 # Local-First Literature
 
+**中文简介**  
+Local-First Literature 是一个“本地文献优先”的文献雷达。它不是先拿关键词去网上搜一大堆文章，而是先读取和整理你已经保存的本地文献库，理解你的研究方向、已有证据和缺口，再去查找真正值得补充的新文献。它会把新结果和本地文献去重，标注“已有 / 近似已有 / 真正新 / 值得补”，并从课题相关性、机制价值、实验可借鉴度、缺口填补度、本地新颖性、期刊年份信号和证据完整度等维度分别评分，最后输出可直接行动的 Excel 证据矩阵和 Word/HTML 阅读优先级报告。
+
+相比普通文献搜索工具，它的核心优势是：**先理解你的已有文献和研究设计，再进行查漏补缺式检索**。这让它更适合长期课题维护、论文写作、实验方案设计、组会准备和文献库迭代，而不是只做一次性的关键词搜索。
+
+---
+
 Local-First Literature is a literature radar that starts from your own paper library before searching the web.
 
 Most literature tools begin with keywords and return a long list of papers. This project reverses the order:
