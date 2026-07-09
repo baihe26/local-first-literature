@@ -28,6 +28,7 @@ Run a literature workflow that starts from the user's own literature sources bef
 
 4. **Search after understanding the library**
    - Run `python -X utf8 scripts/local_first_literature.py search --profile outputs/profile.json --gap-map outputs/gap_map.json --years 3 --output outputs/candidates.jsonl`.
+   - If inferred gap queries are too narrow or return no candidates, add profile-level `search_queries` and rerun search. Use 3-6 term queries that each represent one project facet instead of one over-constrained mega-query.
    - Prefer public metadata APIs that do not require keys. Record query strings and exact date windows.
    - Use journal watchlists only as filters or boosts; do not make top-journal scanning the whole method.
 
@@ -35,12 +36,24 @@ Run a literature workflow that starts from the user's own literature sources bef
    - Run `python -X utf8 scripts/local_first_literature.py score --index outputs/local_library.jsonl --candidates outputs/candidates.jsonl --profile outputs/profile.json --gap-map outputs/gap_map.json --output outputs/scored.jsonl`.
    - Label each candidate as `already`, `near_duplicate`, `genuinely_new`, `worth_adding`, or `low_priority_duplicate`.
    - Score each paper separately on topic relevance, mechanism value, experiment reusability, gap filling, novelty against local library, journal/year signal, and evidence richness.
+   - Do not let the search query itself contribute to relevance scores; use query only for provenance.
    - Avoid flat scores. Use the rubric in `references/scoring-rubric.md`, then sort by calibrated total score.
 
-6. **Render outputs**
+6. **Manual triage layer**
+   - Run `python -X utf8 scripts/local_first_literature.py triage --scored outputs/scored.jsonl --profile outputs/profile.json --output-dir outputs/triage`.
+   - Use `direct_priority_terms`, `method_priority_terms`, and `deprioritize_terms` in the profile to bucket papers into `direct_priority`, `method_or_figure_reference`, `watchlist`, `duplicate_or_seen`, and `low_priority_manual_check`.
+   - Treat triage as a reading-priority aid, not as a substitute for full-text judgment.
+
+7. **Render outputs**
    - Run `python -X utf8 scripts/local_first_literature.py render --scored outputs/scored.jsonl --output-dir outputs/report`.
    - Prefer Excel evidence matrices and Word reports when `openpyxl` and `python-docx` are available. Always also write CSV/HTML fallbacks.
    - Include evidence boundaries: title/abstract only, full text available, methods seen, figure legends seen, extraction failed, or manual verification needed.
+
+## Large Library Rule
+
+- For a first run on a large folder, start with `--max-pages 5 --max-chars 20000`; this usually captures title/DOI/abstract/method cues without stalling on hundreds of PDFs.
+- After the radar identifies top candidates or local clusters, rerun a deeper index only for selected folders or papers.
+- If a run appears stuck during PDF extraction, stop it and rerun with lighter limits rather than launching duplicate jobs.
 
 ## Source Adapters
 
@@ -86,4 +99,11 @@ python -X utf8 scripts/local_first_literature.py run \
 python -X utf8 scripts/local_first_literature.py render \
   --scored outputs/gap_radar_run/scored.jsonl \
   --output-dir outputs/gap_radar_run/report
+```
+
+```bash
+python -X utf8 scripts/local_first_literature.py triage \
+  --scored outputs/gap_radar_run/scored.jsonl \
+  --profile outputs/gap_radar_run/inferred_profile.json \
+  --output-dir outputs/gap_radar_run/triage
 ```

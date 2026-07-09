@@ -1227,6 +1227,174 @@ def build_rationale(cand: Dict[str, Any], axes: Dict[str, float], label: str, du
     return f"Genuinely new candidate; strongest signals: {words}."
 
 
+def candidate_evidence_text(candidate: Dict[str, Any]) -> str:
+    return " ".join(str(candidate.get(k, "")) for k in ("title", "abstract", "journal"))
+
+
+def profile_terms(profile: Dict[str, Any], keys: Sequence[str]) -> List[str]:
+    terms: List[str] = []
+    for key in keys:
+        val = profile.get(key, [])
+        if isinstance(val, str):
+            terms.append(val)
+        else:
+            terms.extend(str(v) for v in val or [])
+    return [normalize_space(t) for t in terms if normalize_space(t)]
+
+
+def terms_hit(terms: Sequence[str], text: str) -> List[str]:
+    lower = text.lower()
+    hits = []
+    for term in terms:
+        t = str(term).strip()
+        if len(t) >= 3 and t.lower() in lower:
+            hits.append(t)
+    return hits
+
+
+def triage_record(candidate: Dict[str, Any], profile: Dict[str, Any], direct_threshold: int) -> Dict[str, Any]:
+    text = candidate_evidence_text(candidate)
+    direct_terms = profile_terms(profile, ("direct_priority_terms", "must_have_terms", "core_topics", "core_terms"))
+    method_terms = profile_terms(profile, ("method_priority_terms", "method_terms", "experiment_reference_needs"))
+    deprioritize_terms = profile_terms(profile, ("deprioritize_terms", "exclusion_topics"))
+    direct_hits = terms_hit(direct_terms, text)
+    method_hits = terms_hit(method_terms, text)
+    deprioritize_hits = terms_hit(deprioritize_terms, text)
+    dedup = candidate.get("dedup_label", "")
+    try:
+        total = float(candidate.get("score_total") or 0)
+        experiment = float(candidate.get("score_experiment_reusability") or 0)
+    except Exception:
+        total = 0.0
+        experiment = 0.0
+
+    if dedup in {"already", "near_duplicate", "low_priority_duplicate"}:
+        bucket = "duplicate_or_seen"
+        reason = "Already present or very close to a local record; use only to confirm coverage."
+    elif deprioritize_hits and len(direct_hits) < direct_threshold:
+        bucket = "low_priority_manual_check"
+        reason = "Matched deprioritization terms without enough direct project terms: " + ", ".join(deprioritize_hits[:5])
+    elif len(direct_hits) >= direct_threshold:
+        bucket = "direct_priority"
+        reason = "Direct project-term hits: " + ", ".join(direct_hits[:6])
+    elif method_hits or experiment >= 60:
+        bucket = "method_or_figure_reference"
+        reason = "Useful method/readout/evidence-chain signal: " + ", ".join(method_hits[:6] or ["high experiment score"])
+    elif total >= 60:
+        bucket = "watchlist"
+        reason = "Good overall score but weak direct-rule evidence; manually inspect before reading in full."
+    else:
+        bucket = "low_priority_manual_check"
+        reason = "Low direct-rule evidence after deduplication and scoring."
+
+    return {
+        **candidate,
+        "manual_bucket": bucket,
+        "manual_reason": reason,
+        "manual_direct_hits": "; ".join(direct_hits[:12]),
+        "manual_method_hits": "; ".join(method_hits[:12]),
+        "manual_deprioritize_hits": "; ".join(deprioritize_hits[:12]),
+    }
+
+
+def triage_outputs(scored_path: Path, profile_path: Path, output_dir: Path, top: int, direct_threshold: int) -> None:
+    ensure_dir(output_dir)
+    records = read_records(scored_path)
+    profile = load_profile(profile_path)
+    triaged = [triage_record(record, profile, direct_threshold=direct_threshold) for record in records]
+    bucket_order = {
+        "direct_priority": 0,
+        "method_or_figure_reference": 1,
+        "watchlist": 2,
+        "duplicate_or_seen": 3,
+        "low_priority_manual_check": 4,
+    }
+    triaged.sort(key=lambda r: (bucket_order.get(r.get("manual_bucket", ""), 9), -(float(r.get("score_total") or 0))))
+    write_jsonl(output_dir / "manual_triage.jsonl", triaged)
+    write_triage_csv(output_dir / "manual_triage.csv", triaged)
+    write_triage_html(output_dir / "manual_triage.html", triaged[:top])
+    try_write_triage_docx(output_dir / "manual_triage.docx", triaged[:top])
+    eprint(f"[ok] wrote manual triage outputs: {output_dir}")
+
+
+def write_triage_csv(path: Path, records: Sequence[Dict[str, Any]]) -> None:
+    ensure_parent(path)
+    fields = [
+        "manual_bucket", "score_total", "dedup_label", "title", "year", "journal", "doi", "url",
+        "manual_reason", "manual_direct_hits", "manual_method_hits", "manual_deprioritize_hits",
+        "rationale", "query", "abstract",
+    ]
+    with path.open("w", encoding="utf-8-sig", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
+        writer.writeheader()
+        for rec in records:
+            writer.writerow(rec)
+
+
+def write_triage_html(path: Path, records: Sequence[Dict[str, Any]]) -> None:
+    ensure_parent(path)
+    rows = []
+    for rec in records:
+        rows.append(
+            "<tr>"
+            f"<td>{html.escape(str(rec.get('manual_bucket', '')))}</td>"
+            f"<td>{html.escape(str(rec.get('score_total', '')))}</td>"
+            f"<td>{html.escape(str(rec.get('title', '')))}</td>"
+            f"<td>{html.escape(str(rec.get('year', '')))}</td>"
+            f"<td>{html.escape(str(rec.get('journal', '')))}</td>"
+            f"<td>{html.escape(str(rec.get('manual_reason', '')))}</td>"
+            "</tr>"
+        )
+    doc = f"""<!doctype html>
+<meta charset="utf-8">
+<title>Literature Gap Radar manual triage</title>
+<style>
+body {{ font-family: Arial, sans-serif; margin: 32px; }}
+table {{ border-collapse: collapse; width: 100%; }}
+th, td {{ border: 1px solid #ddd; padding: 6px; vertical-align: top; }}
+th {{ background: #f3f4f6; }}
+</style>
+<h1>Literature Gap Radar manual triage</h1>
+<p>Generated {dt.datetime.now().isoformat(timespec='seconds')}</p>
+<table>
+<tr><th>Bucket</th><th>Score</th><th>Title</th><th>Year</th><th>Journal</th><th>Manual reason</th></tr>
+{''.join(rows)}
+</table>
+"""
+    path.write_text(doc, encoding="utf-8")
+
+
+def try_write_triage_docx(path: Path, records: Sequence[Dict[str, Any]]) -> None:
+    try:
+        from docx import Document  # type: ignore
+    except Exception:
+        eprint("[warn] python-docx unavailable; skipped triage docx")
+        return
+    doc = Document()
+    doc.add_heading("Literature Gap Radar manual triage", 0)
+    doc.add_paragraph(f"Generated: {dt.datetime.now().isoformat(timespec='seconds')}")
+    doc.add_paragraph("Buckets: direct_priority, method_or_figure_reference, watchlist, duplicate_or_seen, low_priority_manual_check.")
+    current = None
+    shown_in_bucket = 0
+    for rec in records:
+        bucket = rec.get("manual_bucket", "")
+        if bucket != current:
+            current = bucket
+            shown_in_bucket = 0
+            doc.add_heading(str(bucket), level=1)
+        shown_in_bucket += 1
+        doc.add_heading(f"{shown_in_bucket}. [{rec.get('score_total', '')}] {rec.get('title', '')}", level=2)
+        doc.add_paragraph(f"Status: {rec.get('dedup_label', '')}; Year: {rec.get('year', '')}; Journal: {rec.get('journal', '')}")
+        doc.add_paragraph(f"Manual reason: {rec.get('manual_reason', '')}")
+        if rec.get("doi"):
+            doc.add_paragraph(f"DOI: {rec.get('doi')}")
+        if rec.get("query"):
+            doc.add_paragraph(f"Search query: {rec.get('query')}")
+        doc.add_paragraph(f"Auto rationale: {rec.get('rationale', '')}")
+    ensure_parent(path)
+    doc.save(path)
+
+
 def render_outputs(scored_path: Path, output_dir: Path, top: int) -> None:
     ensure_dir(output_dir)
     records = read_records(scored_path)
@@ -1364,6 +1532,7 @@ def command_run(args: argparse.Namespace) -> None:
     build_gap_map(profile, gap_map, args.design or [])
     search_openalex(profile, gap_map, candidates, years=args.years, from_date=args.from_date, to_date=args.to_date, per_query=args.per_query, max_queries=args.max_queries, mailto=args.mailto)
     score_candidates(index, candidates, profile, gap_map, scored)
+    triage_outputs(scored, profile, out / "triage", top=args.top, direct_threshold=args.direct_threshold)
     render_outputs(scored, out / "report", top=args.top)
 
 
@@ -1418,6 +1587,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--top", type=int, default=40)
     p.set_defaults(func=lambda a: render_outputs(Path(a.scored), Path(a.output_dir), a.top))
 
+    p = sub.add_parser("triage", help="Bucket scored candidates for manual reading priority")
+    p.add_argument("--scored", required=True)
+    p.add_argument("--profile", required=True)
+    p.add_argument("--output-dir", required=True)
+    p.add_argument("--top", type=int, default=60)
+    p.add_argument("--direct-threshold", type=int, default=2)
+    p.set_defaults(func=lambda a: triage_outputs(Path(a.scored), Path(a.profile), Path(a.output_dir), a.top, a.direct_threshold))
+
     p = sub.add_parser("run", help="Run the full Literature Gap Radar pipeline")
     p.add_argument("--roots", nargs="+", required=True)
     p.add_argument("--design", nargs="*", default=[])
@@ -1431,6 +1608,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--max-pages", type=int, default=80)
     p.add_argument("--max-chars", type=int, default=260000)
     p.add_argument("--top", type=int, default=40)
+    p.add_argument("--direct-threshold", type=int, default=2)
     p.set_defaults(func=command_run)
     return parser
 

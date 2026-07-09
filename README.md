@@ -23,6 +23,15 @@ Most literature tools start with keywords and return a long list of papers. This
 
 The result is not just "papers matching a keyword"; it is a ranked list of what is already covered, what is near-duplicate, what is genuinely new, and what is worth adding because it fills a specific research gap.
 
+## Skill Or Script?
+
+It is both:
+
+- As a **Codex skill**, `SKILL.md` teaches an AI agent when and how to run the literature-radar workflow.
+- As a **Python CLI script**, `scripts/local_first_literature.py` performs the deterministic work: indexing, profile inference, gap mapping, OpenAlex search, deduplication, scoring, triage, and report rendering.
+
+If you use Codex, ask it to use `$literature-gap-radar`. If you prefer the command line, run the Python script directly.
+
 ## Why It Is Different
 
 - **Local-source-first, not keyword-first**  
@@ -45,6 +54,9 @@ The result is not just "papers matching a keyword"; it is a ranked list of what 
 
 - **Actionable outputs**  
   It writes CSV/HTML by default and produces Excel/Word reports when `openpyxl` and `python-docx` are installed.
+
+- **Manual triage layer**  
+  It can add a second-pass, profile-driven bucket (`direct_priority`, `method_or_figure_reference`, `watchlist`, `duplicate_or_seen`, `low_priority_manual_check`) so broad searches do not become a messy reading pile.
 
 ## Supported Local Sources
 
@@ -100,6 +112,8 @@ python -X utf8 scripts/local_first_literature.py run \
   --roots "/path/to/papers" "/path/to/Zotero" "/path/to/obsidian-vault" \
   --design "/path/to/project_design.docx" \
   --years 3 \
+  --max-pages 5 \
+  --max-chars 20000 \
   --output-dir outputs/gap_radar_run
 ```
 
@@ -161,6 +175,22 @@ python -X utf8 scripts/local_first_literature.py render \
   --output-dir outputs/report
 ```
 
+Create manual triage outputs:
+
+```bash
+python -X utf8 scripts/local_first_literature.py triage \
+  --scored outputs/scored.jsonl \
+  --profile outputs/profile.json \
+  --output-dir outputs/triage
+```
+
+## Practical Lessons
+
+- Start large libraries with a light scan: `--max-pages 5 --max-chars 20000`. Deep full-text extraction can be rerun later on selected folders.
+- Put broad but intentional `search_queries` in the profile. Avoid one over-constrained query that combines every term in the project.
+- The scoring model uses title/abstract/journal evidence, not the query string, so a paper does not get a free relevance boost merely because a broad query found it.
+- Use triage terms to separate direct reads from method-only or low-priority references.
+
 ## Output Files
 
 Typical outputs include:
@@ -171,6 +201,9 @@ Typical outputs include:
 - `gap_map.json`: literature needs split by background, mechanism, methods, controls, benchmarks, and writing/figure needs.
 - `candidates.jsonl`: newly searched candidates.
 - `scored.jsonl`: deduplicated and scored candidates.
+- `triage/manual_triage.csv`
+- `triage/manual_triage.html`
+- `triage/manual_triage.docx` if `python-docx` is installed.
 - `report/literature_evidence_matrix.csv`
 - `report/reading_priority_report.html`
 - `report/literature_evidence_matrix.xlsx` if `openpyxl` is installed.

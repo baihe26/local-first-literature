@@ -26,6 +26,8 @@ Avoid assigning identical scores to many papers. Strong papers should differ bec
 
 Use a stable deterministic tie-breaker only for sorting papers with otherwise similar evidence; never let the tie-breaker override scientific reasoning.
 
+Do not score relevance from the search query itself. Queries are provenance, not evidence. Use title, abstract, venue, local snippets, methods, figures, and profile/gap terms.
+
 ## Evidence Boundary
 
 Always distinguish these situations:

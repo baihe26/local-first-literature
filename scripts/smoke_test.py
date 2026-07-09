@@ -92,6 +92,11 @@ def main() -> int:
             "--profile", str(profile), "--gap-map", str(gap),
             "--output", str(scored),
         ])
+        run([
+            sys.executable, "-X", "utf8", str(script), "triage",
+            "--scored", str(scored), "--profile", str(profile),
+            "--output-dir", str(out / "triage"),
+        ])
         run([sys.executable, "-X", "utf8", str(script), "render", "--scored", str(scored), "--output-dir", str(out / "report")])
 
         assert index.exists()
@@ -101,6 +106,8 @@ def main() -> int:
         assert profile.exists()
         assert gap.exists()
         assert scored.exists()
+        assert (out / "triage" / "manual_triage.csv").exists()
+        assert (out / "triage" / "manual_triage.html").exists()
         assert (out / "report" / "literature_evidence_matrix.csv").exists()
         assert (out / "report" / "reading_priority_report.html").exists()
         print(f"Smoke test passed. Temporary output was: {out}")

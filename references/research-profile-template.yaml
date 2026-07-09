@@ -26,11 +26,31 @@ method_terms:
   - data analysis method
   - model system
 
+# Optional but recommended: broad, facet-specific searches.
+# Keep each query focused; avoid combining every project term into one mega-query.
+search_queries:
+  - primary system mechanism
+  - material or method application
+  - experimental readout benchmark
+
 experiment_reference_needs:
   - protocol details
   - controls
   - quantitative readouts
   - figure style or evidence chain
+
+# Optional manual triage terms used after automatic scoring.
+direct_priority_terms:
+  - terms that must appear for full-reading priority
+  - exact material/model/disease/system terms
+
+method_priority_terms:
+  - reusable assay or characterization terms
+  - figure or evidence-chain terms
+
+deprioritize_terms:
+  - superficially related but wrong application
+  - terms that should push a paper to manual low priority
 
 gap_questions:
   - What evidence is missing from the current project design?
