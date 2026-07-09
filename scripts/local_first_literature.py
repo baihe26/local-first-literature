@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local-first literature radar.
+"""Literature Gap Radar.
 
 This script intentionally starts from the user's local library before searching
 new literature. It uses only the Python standard library for core operations;
@@ -18,6 +18,7 @@ import json
 import math
 import os
 import re
+import sqlite3
 import sys
 import time
 import urllib.parse
@@ -40,13 +41,17 @@ DEFAULT_WEIGHTS = {
     "evidence_richness": 0.04,
 }
 
-TEXT_EXTENSIONS = {".txt", ".md", ".csv", ".ris", ".bib"}
-DOC_EXTENSIONS = {".pdf", ".docx", ".txt", ".md", ".ris", ".bib"}
+TEXT_EXTENSIONS = {".txt", ".md", ".csv"}
+FULLTEXT_EXTENSIONS = {".pdf", ".docx", ".txt", ".md"}
+METADATA_EXTENSIONS = {".ris", ".bib", ".nbib", ".xml"}
+DOC_EXTENSIONS = FULLTEXT_EXTENSIONS | METADATA_EXTENSIONS
+BINARY_LIBRARY_EXTENSIONS = {".enl", ".enlx", ".enlp"}
 GENERATED_SKIP_TOKENS = {
-    "__pycache__", "local_first_literature_radar", "frontier_scan",
+    "__pycache__", "local_first_literature_radar", "literature_gap_radar", "frontier_scan",
     "frontier_screened", "frontier_enriched", "manifest", "证据矩阵",
     "阅读优先级", "归纳说明", "文献深度清点", "全本文献深度清点",
     "已有文献总清点", "literature_evidence_matrix", "reading_priority_report",
+    "literature_gap_radar",
 }
 
 STOPWORDS = {
@@ -256,6 +261,374 @@ def evidence_flags(text: str, status: str) -> Dict[str, Any]:
     }
 
 
+def root_for_path(path: Path, roots: Sequence[str]) -> str:
+    for root in roots:
+        try:
+            path.relative_to(Path(root))
+            return str(Path(root))
+        except Exception:
+            continue
+    return ""
+
+
+def detect_source_kind(path: Path) -> str:
+    if path.is_file():
+        suffix = path.suffix.lower()
+        if path.name.lower() == "zotero.sqlite":
+            return "zotero_sqlite"
+        if suffix in {".ris", ".nbib"}:
+            return "ris_export"
+        if suffix == ".bib":
+            return "bibtex_export"
+        if suffix == ".xml":
+            return "xml_export"
+        if suffix in BINARY_LIBRARY_EXTENSIONS:
+            return "endnote_binary"
+        if suffix == ".md":
+            return "obsidian_or_markdown_note"
+        return "file"
+    if (path / "zotero.sqlite").exists():
+        return "zotero_data_directory"
+    if (path / ".obsidian").exists():
+        return "obsidian_vault"
+    if any(p.suffix.lower() in BINARY_LIBRARY_EXTENSIONS for p in path.glob("*")):
+        return "endnote_library_directory"
+    return "folder"
+
+
+def build_source_manifest(roots: Sequence[str]) -> Dict[str, Any]:
+    entries: List[Dict[str, Any]] = []
+    for root in roots:
+        path = Path(root)
+        entry: Dict[str, Any] = {
+            "path": str(path),
+            "exists": path.exists(),
+            "source_kind": detect_source_kind(path) if path.exists() else "missing",
+            "notes": [],
+        }
+        if not path.exists():
+            entry["notes"].append("Path was not found and was skipped.")
+        elif entry["source_kind"] in {"endnote_binary", "endnote_library_directory"}:
+            entry["notes"].append("EndNote .enl/.enlx is proprietary; export RIS, BibTeX, or XML for record-level metadata. Attached PDFs are still indexed if they are under the supplied path.")
+        elif entry["source_kind"] in {"zotero_sqlite", "zotero_data_directory"}:
+            entry["notes"].append("Zotero metadata is read from zotero.sqlite when accessible; storage PDFs are also indexed as local full text.")
+        elif entry["source_kind"] == "obsidian_vault":
+            entry["notes"].append("Markdown notes are indexed as local text; linked PDFs are indexed when they live under the supplied path.")
+        entries.append(entry)
+    return {"created_at": dt.datetime.now().isoformat(timespec="seconds"), "sources": entries}
+
+
+def record_from_metadata(
+    *,
+    title: str,
+    abstract: str = "",
+    doi: str = "",
+    year: Optional[int] = None,
+    journal: str = "",
+    authors: str = "",
+    source_path: str = "",
+    root: str = "",
+    source_adapter: str = "metadata",
+    local_record_id: str = "",
+    attachment_paths: Optional[Sequence[str]] = None,
+) -> Dict[str, Any]:
+    text = "\n".join(part for part in (title, abstract, journal, authors) if part)
+    snippets = extract_snippets(text)
+    if abstract and not snippets.get("abstract_snippet"):
+        snippets["abstract_snippet"] = abstract[:1800]
+    status = f"metadata:{source_adapter}"
+    return {
+        "source_path": source_path,
+        "root": root,
+        "filename": Path(source_path).name if source_path else "",
+        "file_ext": Path(source_path).suffix.lower() if source_path else "",
+        "file_size": Path(source_path).stat().st_size if source_path and Path(source_path).exists() else 0,
+        "sha1": hashlib.sha1((source_adapter + local_record_id + title + doi).encode("utf-8", errors="ignore")).hexdigest(),
+        "doi": normalize_doi(doi) or find_doi(text),
+        "title": normalize_space(title),
+        "title_normalized": normalize_title(title),
+        "year": year or find_year(text),
+        "journal": normalize_space(journal),
+        "authors": normalize_space(authors),
+        "source_adapter": source_adapter,
+        "local_record_id": local_record_id,
+        "attachment_paths": list(attachment_paths or []),
+        **snippets,
+        **evidence_flags(text, status),
+        "manual_verification_needed": True,
+    }
+
+
+def parse_ris_records(path: Path, roots: Sequence[str]) -> List[Dict[str, Any]]:
+    text, _ = read_text_plain(path, max_chars=20_000_000)
+    raw_records = re.split(r"(?im)^\s*ER\s*-\s*$", text)
+    records: List[Dict[str, Any]] = []
+    for idx, raw in enumerate(raw_records, 1):
+        fields: Dict[str, List[str]] = {}
+        current = ""
+        for line in raw.splitlines():
+            m = re.match(r"^([A-Z0-9]{2})\s*-\s*(.*)$", line.strip())
+            if m:
+                current = m.group(1)
+                fields.setdefault(current, []).append(m.group(2).strip())
+            elif current and line.strip():
+                fields[current][-1] += " " + line.strip()
+        title = first_field(fields, ("TI", "T1", "CT", "BT"))
+        if not title:
+            continue
+        year = parse_year(first_field(fields, ("PY", "Y1", "DA")))
+        authors = "; ".join(fields.get("AU", [])[:12])
+        records.append(
+            record_from_metadata(
+                title=title,
+                abstract=first_field(fields, ("AB", "N2")),
+                doi=first_field(fields, ("DO",)),
+                year=year,
+                journal=first_field(fields, ("JO", "JF", "JA", "T2")),
+                authors=authors,
+                source_path=str(path),
+                root=root_for_path(path, roots),
+                source_adapter="ris",
+                local_record_id=f"{path.name}#{idx}",
+                attachment_paths=fields.get("L1", []) + fields.get("L2", []),
+            )
+        )
+    return records
+
+
+def parse_bibtex_records(path: Path, roots: Sequence[str]) -> List[Dict[str, Any]]:
+    text, _ = read_text_plain(path, max_chars=20_000_000)
+    records: List[Dict[str, Any]] = []
+    for idx, entry in enumerate(split_bibtex_entries(text), 1):
+        fields = parse_bibtex_fields(entry)
+        title = cleanup_bibtex_value(fields.get("title", ""))
+        if not title:
+            continue
+        records.append(
+            record_from_metadata(
+                title=title,
+                abstract=cleanup_bibtex_value(fields.get("abstract", "")),
+                doi=cleanup_bibtex_value(fields.get("doi", "")),
+                year=parse_year(cleanup_bibtex_value(fields.get("year", "") or fields.get("date", ""))),
+                journal=cleanup_bibtex_value(fields.get("journal", "") or fields.get("journaltitle", "") or fields.get("booktitle", "")),
+                authors=cleanup_bibtex_value(fields.get("author", "")),
+                source_path=str(path),
+                root=root_for_path(path, roots),
+                source_adapter="bibtex",
+                local_record_id=f"{path.name}#{idx}",
+                attachment_paths=[cleanup_bibtex_value(fields.get(k, "")) for k in ("file", "url") if fields.get(k)],
+            )
+        )
+    return records
+
+
+def split_bibtex_entries(text: str) -> List[str]:
+    starts = [m.start() for m in re.finditer(r"@\w+\s*\{", text)]
+    entries = []
+    for i, start in enumerate(starts):
+        end = starts[i + 1] if i + 1 < len(starts) else len(text)
+        entries.append(text[start:end])
+    return entries
+
+
+def parse_bibtex_fields(entry: str) -> Dict[str, str]:
+    fields: Dict[str, str] = {}
+    for m in re.finditer(r"(?is)\b([A-Za-z][A-Za-z0-9_-]*)\s*=\s*(\{(?:[^{}]|\{[^{}]*\})*\}|\"[^\"]*\"|[^,\n]+)", entry):
+        fields[m.group(1).lower()] = m.group(2).strip().rstrip(",")
+    return fields
+
+
+def cleanup_bibtex_value(value: str) -> str:
+    value = (value or "").strip().strip(",")
+    if (value.startswith("{") and value.endswith("}")) or (value.startswith('"') and value.endswith('"')):
+        value = value[1:-1]
+    value = value.replace("{", "").replace("}", "")
+    return normalize_space(value)
+
+
+def parse_endnote_xml_records(path: Path, roots: Sequence[str]) -> List[Dict[str, Any]]:
+    try:
+        root = ET.parse(path).getroot()
+    except Exception as exc:
+        eprint(f"[warn] XML metadata parse failed: {path} ({type(exc).__name__})")
+        return []
+    records: List[Dict[str, Any]] = []
+    for idx, rec in enumerate([n for n in root.iter() if strip_ns(n.tag).lower() == "record"], 1):
+        title = xml_text_first(rec, ("title",))
+        if not title:
+            continue
+        authors = "; ".join(xml_texts(rec, ("author",))[:12])
+        records.append(
+            record_from_metadata(
+                title=title,
+                abstract=xml_text_first(rec, ("abstract",)),
+                doi=xml_text_first(rec, ("electronic-resource-num", "doi")),
+                year=parse_year(xml_text_first(rec, ("year", "dates"))),
+                journal=xml_text_first(rec, ("full-title", "secondary-title", "journal")),
+                authors=authors,
+                source_path=str(path),
+                root=root_for_path(path, roots),
+                source_adapter="endnote_xml",
+                local_record_id=f"{path.name}#{idx}",
+            )
+        )
+    return records
+
+
+def parse_zotero_sqlite(path: Path, roots: Sequence[str]) -> List[Dict[str, Any]]:
+    try:
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+    except Exception as exc:
+        eprint(f"[warn] Zotero sqlite could not be opened: {path} ({type(exc).__name__})")
+        return []
+    try:
+        fields_by_item: Dict[int, Dict[str, str]] = {}
+        query = """
+            SELECT i.itemID, i.key, it.typeName, f.fieldName, v.value
+            FROM items i
+            JOIN itemTypes it ON i.itemTypeID = it.itemTypeID
+            JOIN itemData d ON i.itemID = d.itemID
+            JOIN fields f ON d.fieldID = f.fieldID
+            JOIN itemDataValues v ON d.valueID = v.valueID
+            WHERE it.typeName IN ('journalArticle','conferencePaper','bookSection','preprint','thesis','report','book')
+        """
+        item_meta: Dict[int, Dict[str, str]] = {}
+        for row in conn.execute(query):
+            item_id = int(row["itemID"])
+            fields_by_item.setdefault(item_id, {})[str(row["fieldName"])] = str(row["value"])
+            item_meta.setdefault(item_id, {"key": str(row["key"]), "type": str(row["typeName"])})
+
+        authors_by_item: Dict[int, List[str]] = {}
+        try:
+            for row in conn.execute(
+                """
+                SELECT ic.itemID, cd.firstName, cd.lastName, cd.fieldMode
+                FROM itemCreators ic
+                JOIN creators c ON ic.creatorID = c.creatorID
+                JOIN creatorData cd ON c.creatorDataID = cd.creatorDataID
+                ORDER BY ic.itemID, ic.orderIndex
+                """
+            ):
+                item_id = int(row["itemID"])
+                if int(row["fieldMode"] or 0) == 1:
+                    name = str(row["lastName"] or "")
+                else:
+                    name = normalize_space(f"{row['firstName'] or ''} {row['lastName'] or ''}")
+                if name:
+                    authors_by_item.setdefault(item_id, []).append(name)
+        except Exception:
+            pass
+
+        attachments_by_item: Dict[int, List[str]] = {}
+        try:
+            for row in conn.execute(
+                """
+                SELECT ia.parentItemID, ai.key, ia.path
+                FROM itemAttachments ia
+                JOIN items ai ON ia.itemID = ai.itemID
+                WHERE ia.parentItemID IS NOT NULL
+                """
+            ):
+                parent = int(row["parentItemID"])
+                att_path = str(row["path"] or "")
+                if att_path.startswith("storage:"):
+                    att_path = str(path.parent / "storage" / str(row["key"]) / att_path.split(":", 1)[1])
+                attachments_by_item.setdefault(parent, []).append(att_path)
+        except Exception:
+            pass
+
+        records = []
+        for item_id, fields in fields_by_item.items():
+            title = fields.get("title", "")
+            if not title:
+                continue
+            records.append(
+                record_from_metadata(
+                    title=title,
+                    abstract=fields.get("abstractNote", ""),
+                    doi=fields.get("DOI", ""),
+                    year=parse_year(fields.get("date", "")),
+                    journal=fields.get("publicationTitle", "") or fields.get("journalAbbreviation", ""),
+                    authors="; ".join(authors_by_item.get(item_id, [])[:12]),
+                    source_path=str(path),
+                    root=root_for_path(path, roots),
+                    source_adapter="zotero_sqlite",
+                    local_record_id=f"zotero:{item_meta.get(item_id, {}).get('key', item_id)}",
+                    attachment_paths=attachments_by_item.get(item_id, []),
+                )
+            )
+        return records
+    except Exception as exc:
+        eprint(f"[warn] Zotero sqlite parse failed: {path} ({type(exc).__name__})")
+        return []
+    finally:
+        conn.close()
+
+
+def strip_ns(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1] if "}" in tag else tag
+
+
+def xml_texts(node: ET.Element, names: Sequence[str]) -> List[str]:
+    wanted = {n.lower() for n in names}
+    values = []
+    for child in node.iter():
+        if strip_ns(child.tag).lower() in wanted:
+            text = normalize_space(" ".join(t.strip() for t in child.itertext() if t and t.strip()))
+            if text:
+                values.append(text)
+    return values
+
+
+def xml_text_first(node: ET.Element, names: Sequence[str]) -> str:
+    values = xml_texts(node, names)
+    return values[0] if values else ""
+
+
+def first_field(fields: Dict[str, List[str]], names: Sequence[str]) -> str:
+    for name in names:
+        values = fields.get(name)
+        if values:
+            return normalize_space(values[0])
+    return ""
+
+
+def parse_year(value: str) -> Optional[int]:
+    m = YEAR_RE.search(value or "")
+    return int(m.group(1)) if m else None
+
+
+def iter_metadata_records(roots: Sequence[str]) -> Iterable[Dict[str, Any]]:
+    seen_files: set[str] = set()
+    for root in roots:
+        root_path = Path(root)
+        if not root_path.exists():
+            continue
+        candidates: List[Path] = []
+        if root_path.is_file():
+            candidates.append(root_path)
+        else:
+            zotero = root_path / "zotero.sqlite"
+            if zotero.exists():
+                candidates.append(zotero)
+            candidates.extend(p for p in root_path.rglob("*") if p.is_file() and p.suffix.lower() in METADATA_EXTENSIONS)
+        for path in candidates:
+            key = str(path.resolve()).lower()
+            if key in seen_files or should_skip_index_file(path):
+                continue
+            seen_files.add(key)
+            suffix = path.suffix.lower()
+            if path.name.lower() == "zotero.sqlite":
+                yield from parse_zotero_sqlite(path, roots)
+            elif suffix in {".ris", ".nbib"}:
+                yield from parse_ris_records(path, roots)
+            elif suffix == ".bib":
+                yield from parse_bibtex_records(path, roots)
+            elif suffix == ".xml":
+                yield from parse_endnote_xml_records(path, roots)
+
+
 def iter_literature_files(roots: Sequence[str]) -> Iterable[Path]:
     seen = set()
     for root in roots:
@@ -263,10 +636,11 @@ def iter_literature_files(roots: Sequence[str]) -> Iterable[Path]:
         if not root_path.exists():
             eprint(f"[warn] root not found: {root}")
             continue
-        for path in root_path.rglob("*"):
+        files = [root_path] if root_path.is_file() else root_path.rglob("*")
+        for path in files:
             if not path.is_file():
                 continue
-            if path.suffix.lower() not in DOC_EXTENSIONS:
+            if path.suffix.lower() not in FULLTEXT_EXTENSIONS:
                 continue
             if should_skip_index_file(path):
                 continue
@@ -295,14 +669,8 @@ def build_local_record(path: Path, roots: Sequence[str], max_pages: int, max_cha
     doi = find_doi(text, path.name)
     year = find_year(text, path.name)
     title = title_from_filename(path)
-    root_label = ""
-    for root in roots:
-        try:
-            path.relative_to(Path(root))
-            root_label = str(Path(root))
-            break
-        except Exception:
-            continue
+    root_label = root_for_path(path, roots)
+    source_kind = "obsidian_markdown" if path.suffix.lower() == ".md" and any(part.lower() == ".obsidian" for part in path.parts) else "file"
     return {
         "source_path": str(path),
         "root": root_label,
@@ -314,6 +682,9 @@ def build_local_record(path: Path, roots: Sequence[str], max_pages: int, max_cha
         "title": title,
         "title_normalized": normalize_title(title),
         "year": year,
+        "source_adapter": source_kind,
+        "local_record_id": str(path),
+        "attachment_paths": [],
         **snippets,
         **evidence_flags(text, status),
     }
@@ -327,6 +698,35 @@ def write_jsonl(path: Path, records: Iterable[Dict[str, Any]]) -> int:
             f.write(json.dumps(rec, ensure_ascii=False, sort_keys=True) + "\n")
             count += 1
     return count
+
+
+def dedupe_local_records(records: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    kept: List[Dict[str, Any]] = []
+    seen_doi: set[str] = set()
+    seen_title: set[str] = set()
+    for rec in records:
+        doi = normalize_doi(rec.get("doi", ""))
+        title = rec.get("title_normalized") or normalize_title(rec.get("title", ""))
+        if doi and doi in seen_doi:
+            continue
+        if not doi and title and title in seen_title:
+            continue
+        if doi:
+            seen_doi.add(doi)
+        if title:
+            seen_title.add(title)
+        kept.append(rec)
+    return kept
+
+
+def write_source_manifest(path: Optional[Path], roots: Sequence[str], indexed_count: int) -> None:
+    if not path:
+        return
+    manifest = build_source_manifest(roots)
+    manifest["indexed_record_count"] = indexed_count
+    ensure_parent(path)
+    path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    eprint(f"[ok] wrote source manifest: {path}")
 
 
 def read_json_any(path: Path) -> Any:
@@ -425,7 +825,7 @@ def infer_profile_from_index(index_path: Path, output: Path, design_paths: Seque
     design_counts = Counter(design_terms)
     method_terms = [t for t in terms if any(cue in t for cue in ("pcr", "assay", "staining", "seq", "rheology", "microscopy", "xps", "sem", "tem"))]
     profile = {
-        "profile_name": "inferred-local-first-profile",
+        "profile_name": "inferred-literature-gap-radar-profile",
         "created_at": dt.datetime.now().isoformat(timespec="seconds"),
         "inferred_from_index": str(index_path),
         "local_record_count": len(records),
@@ -630,7 +1030,7 @@ def search_openalex(profile_path: Path, gap_map_path: Optional[Path], output: Pa
         url = "https://api.openalex.org/works?" + urllib.parse.urlencode(params)
         eprint(f"[search] {query}")
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "local-first-literature/0.1"})
+            req = urllib.request.Request(url, headers={"User-Agent": "literature-gap-radar/0.2"})
             with urllib.request.urlopen(req, timeout=30) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
         except Exception as exc:
@@ -861,14 +1261,14 @@ def write_html(path: Path, records: Sequence[Dict[str, Any]]) -> None:
         )
     doc = f"""<!doctype html>
 <meta charset="utf-8">
-<title>Local-first literature report</title>
+<title>Literature Gap Radar report</title>
 <style>
 body {{ font-family: Arial, sans-serif; margin: 32px; }}
 table {{ border-collapse: collapse; width: 100%; }}
 th, td {{ border: 1px solid #ddd; padding: 6px; vertical-align: top; }}
 th {{ background: #f3f4f6; }}
 </style>
-<h1>Local-first literature report</h1>
+<h1>Literature Gap Radar report</h1>
 <p>Generated {dt.datetime.now().isoformat(timespec='seconds')}</p>
 <table>
 <tr><th>Score</th><th>Status</th><th>Title</th><th>Year</th><th>Journal</th><th>Rationale</th></tr>
@@ -909,7 +1309,7 @@ def try_write_docx(path: Path, records: Sequence[Dict[str, Any]]) -> None:
         eprint("[warn] python-docx unavailable; skipped docx")
         return
     doc = Document()
-    doc.add_heading("Local-first literature reading priorities", 0)
+    doc.add_heading("Literature Gap Radar reading priorities", 0)
     doc.add_paragraph(f"Generated: {dt.datetime.now().isoformat(timespec='seconds')}")
     for idx, rec in enumerate(records, 1):
         doc.add_heading(f"{idx}. [{rec.get('score_total', '')}] {rec.get('title', '')}", level=2)
@@ -930,12 +1330,15 @@ def try_write_docx(path: Path, records: Sequence[Dict[str, Any]]) -> None:
 
 
 def command_index(args: argparse.Namespace) -> None:
-    records = (
+    metadata_records = list(iter_metadata_records(args.roots))
+    file_records = [
         build_local_record(path, args.roots, max_pages=args.max_pages, max_chars=args.max_chars)
         for path in iter_literature_files(args.roots)
-    )
+    ]
+    records = dedupe_local_records([*metadata_records, *file_records])
     count = write_jsonl(Path(args.output), records)
-    eprint(f"[ok] indexed {count} local files: {args.output}")
+    write_source_manifest(Path(args.source_manifest) if getattr(args, "source_manifest", None) else None, args.roots, count)
+    eprint(f"[ok] indexed {count} local literature records: {args.output}")
 
 
 def command_run(args: argparse.Namespace) -> None:
@@ -946,7 +1349,7 @@ def command_run(args: argparse.Namespace) -> None:
     gap_map = out / "gap_map.json"
     candidates = out / "candidates.jsonl"
     scored = out / "scored.jsonl"
-    command_index(argparse.Namespace(roots=args.roots, output=str(index), max_pages=args.max_pages, max_chars=args.max_chars))
+    command_index(argparse.Namespace(roots=args.roots, output=str(index), source_manifest=str(out / "source_manifest.json"), max_pages=args.max_pages, max_chars=args.max_chars))
     infer_profile_from_index(index, profile, args.design or [], topn=48)
     build_gap_map(profile, gap_map, args.design or [])
     search_openalex(profile, gap_map, candidates, years=args.years, from_date=args.from_date, to_date=args.to_date, per_query=args.per_query, max_queries=args.max_queries, mailto=args.mailto)
@@ -955,12 +1358,13 @@ def command_run(args: argparse.Namespace) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Local-first literature radar")
+    parser = argparse.ArgumentParser(description="Literature Gap Radar")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    p = sub.add_parser("index", help="Index local literature files")
+    p = sub.add_parser("index", help="Index local literature sources and files")
     p.add_argument("--roots", nargs="+", required=True)
     p.add_argument("--output", required=True)
+    p.add_argument("--source-manifest")
     p.add_argument("--max-pages", type=int, default=80)
     p.add_argument("--max-chars", type=int, default=260000)
     p.set_defaults(func=command_index)
@@ -1004,7 +1408,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--top", type=int, default=40)
     p.set_defaults(func=lambda a: render_outputs(Path(a.scored), Path(a.output_dir), a.top))
 
-    p = sub.add_parser("run", help="Run the full local-first pipeline")
+    p = sub.add_parser("run", help="Run the full Literature Gap Radar pipeline")
     p.add_argument("--roots", nargs="+", required=True)
     p.add_argument("--design", nargs="*", default=[])
     p.add_argument("--years", type=int, default=3)

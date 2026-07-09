@@ -1,21 +1,23 @@
-# Local-First Literature
+# Literature Gap Radar
 
 **中文简介**  
-Local-First Literature 是一个“本地文献优先”的文献雷达。它不是先拿关键词去网上搜一大堆文章，而是先读取和整理你已经保存的本地文献库，理解你的研究方向、已有证据和缺口，再去查找真正值得补充的新文献。它会把新结果和本地文献去重，标注“已有 / 近似已有 / 真正新 / 值得补”，并从课题相关性、机制价值、实验可借鉴度、缺口填补度、本地新颖性、期刊年份信号和证据完整度等维度分别评分，最后输出可直接行动的 Excel 证据矩阵和 Word/HTML 阅读优先级报告。
+Literature Gap Radar 是一个“本地来源优先”的文献雷达。它不是先让用户反复调关键词，而是先读取用户已经拥有的文献、文献管理器导出、笔记库和项目设计，理解研究方向、已有证据和缺口，再去查找真正值得补的新文献。
 
-相比普通文献搜索工具，它的核心优势是：**先理解你的已有文献和研究设计，再进行查漏补缺式检索**。这让它更适合长期课题维护、论文写作、实验方案设计、组会准备和文献库迭代，而不是只做一次性的关键词搜索。
+它会把新结果和本地已有文献去重，标注 `already`、`near_duplicate`、`genuinely_new`、`worth_adding` 或 `low_priority_duplicate`，并分别评分：课题相关性、机制价值、实验可借鉴度、缺口填补度、本地新颖性、期刊/年份信号和证据完整度。最终输出可行动的阅读优先级报告和证据矩阵。
+
+相比普通文献搜索工具，它的优势是：**先理解你的已有文献和项目设计，再进行查漏补缺式检索**。这更适合长期课题维护、论文写作、实验方案设计、组会准备和文献库迭代。
 
 ---
 
-Local-First Literature is a literature radar that starts from your own paper library before searching the web.
+Literature Gap Radar is a local-source-first literature radar.
 
-Most literature tools begin with keywords and return a long list of papers. This project reverses the order:
+Most literature tools start with keywords and return a long list of papers. This project reverses the order:
 
-1. Index your existing PDFs, DOCX files, notes, RIS/BibTeX records, and local literature folders.
-2. Infer what your research direction is from the papers you already keep.
-3. Build a gap map for the project: background, mechanism, methods, controls, benchmarks, and writing or figure needs.
+1. Index your existing literature sources.
+2. Infer your research profile from papers, notes, exports, and optional project designs.
+3. Build a gap map covering background, mechanism, methods, controls, benchmarks, and writing or figure needs.
 4. Search new literature only after the local context is understood.
-5. Deduplicate against your local library.
+5. Deduplicate candidates against your local library.
 6. Score each candidate across multiple axes.
 7. Export an evidence matrix and reading-priority report.
 
@@ -23,8 +25,11 @@ The result is not just "papers matching a keyword"; it is a ranked list of what 
 
 ## Why It Is Different
 
-- **Local-first, not keyword-first**  
-  It reads your existing literature folders before searching, so recommendations are anchored in what you already have.
+- **Local-source-first, not keyword-first**  
+  It starts from what you already have before searching the web.
+
+- **Works beyond PDF folders**  
+  It accepts ordinary folders, loose PDFs/DOCX/TXT/Markdown notes, Zotero data directories or `zotero.sqlite`, RIS/NBIB/BibTeX exports, EndNote XML exports, and Obsidian vaults.
 
 - **Research-gap aware**  
   It can use a project design, proposal, manuscript draft, or inferred profile to identify missing background, mechanism, methods, controls, and benchmark papers.
@@ -36,15 +41,27 @@ The result is not just "papers matching a keyword"; it is a ranked list of what 
   Every candidate gets separate scores for topic relevance, mechanism value, experiment reusability, gap filling, novelty against the local library, journal/year signal, and evidence richness.
 
 - **Evidence boundaries are visible**  
-  The workflow distinguishes metadata-only hits, abstract-level evidence, local full text, methods-like text, figure captions, and extraction failures.
+  The workflow distinguishes metadata-only hits, abstract-level evidence, local full text, methods-like text, figure captions, extraction failures, and items needing manual verification.
 
 - **Actionable outputs**  
   It writes CSV/HTML by default and produces Excel/Word reports when `openpyxl` and `python-docx` are installed.
 
+## Supported Local Sources
+
+| Source | How to provide it | What the radar does |
+| --- | --- | --- |
+| Folder of PDFs/DOCX/TXT/Markdown | `--roots "/path/to/papers"` | Extracts text, DOI, title, year, abstract/method/figure cues |
+| Zotero data directory | `--roots "/path/to/Zotero"` | Reads `zotero.sqlite` metadata when accessible and scans `storage/` PDFs |
+| Zotero/EndNote/Mendeley exports | `--roots export.ris export.bib export.nbib` | Parses each record separately instead of treating the export as one text blob |
+| EndNote XML export | `--roots export.xml` | Parses record-level title, DOI, year, journal, abstract, authors when present |
+| EndNote `.enl`/`.enlx` library | `--roots "/path/to/EndNote Library"` | Detects the proprietary library and scans attached PDFs under the path; export RIS/BibTeX/XML for full metadata |
+| Obsidian vault | `--roots "/path/to/vault"` | Indexes Markdown literature notes and PDFs stored under the vault |
+| Project design or manuscript | `--design design.docx proposal.md` | Uses it to infer gaps and tune search/scoring |
+
 ## Repository Layout
 
 ```text
-local-first-literature/
+literature-gap-radar/
   SKILL.md
   README.md
   LICENSE
@@ -66,16 +83,9 @@ local-first-literature/
 
 ## Installation
 
-Clone the repository:
-
 ```bash
-git clone https://github.com/<your-user>/local-first-literature.git
-cd local-first-literature
-```
-
-Optional dependencies for richer file and report support:
-
-```bash
+git clone https://github.com/<your-user>/literature-gap-radar.git
+cd literature-gap-radar
 python -m pip install -r requirements.txt
 ```
 
@@ -83,28 +93,42 @@ The core workflow uses the Python standard library. Optional packages enable PDF
 
 ## Quick Start
 
-Index a local paper library:
+Run the full pipeline:
+
+```bash
+python -X utf8 scripts/local_first_literature.py run \
+  --roots "/path/to/papers" "/path/to/Zotero" "/path/to/obsidian-vault" \
+  --design "/path/to/project_design.docx" \
+  --years 3 \
+  --output-dir outputs/gap_radar_run
+```
+
+Or run step by step.
+
+Index local sources:
 
 ```bash
 python -X utf8 scripts/local_first_literature.py index \
-  --roots "D:\path\to\papers" \
-  --output outputs/local_library.jsonl
+  --roots "/path/to/papers" "/path/to/zotero.sqlite" export.ris \
+  --output outputs/local_library.jsonl \
+  --source-manifest outputs/source_manifest.json
 ```
 
-Infer a profile from the local library:
+Infer a profile:
 
 ```bash
 python -X utf8 scripts/local_first_literature.py infer-profile \
   --index outputs/local_library.jsonl \
+  --design "/path/to/project_design.docx" \
   --output outputs/profile.json
 ```
 
-Build a gap map from the inferred profile and, optionally, a project design:
+Build a gap map:
 
 ```bash
 python -X utf8 scripts/local_first_literature.py gap-map \
   --profile outputs/profile.json \
-  --design "D:\path\to\project_design.docx" \
+  --design "/path/to/project_design.docx" \
   --output outputs/gap_map.json
 ```
 
@@ -137,21 +161,12 @@ python -X utf8 scripts/local_first_literature.py render \
   --output-dir outputs/report
 ```
 
-Or run the full pipeline:
-
-```bash
-python -X utf8 scripts/local_first_literature.py run \
-  --roots "D:\path\to\papers" \
-  --design "D:\path\to\project_design.docx" \
-  --years 3 \
-  --output-dir outputs/local_first_run
-```
-
 ## Output Files
 
 Typical outputs include:
 
-- `local_library_index.jsonl`: local paper metadata and extraction status.
+- `source_manifest.json`: how each supplied local source was recognized and what limitations apply.
+- `local_library_index.jsonl`: local paper metadata, source adapter, attachment paths, and extraction status.
 - `inferred_profile.json`: inferred research profile.
 - `gap_map.json`: literature needs split by background, mechanism, methods, controls, benchmarks, and writing/figure needs.
 - `candidates.jsonl`: newly searched candidates.
@@ -173,7 +188,7 @@ Each candidate is scored on:
 - `journal_year_signal`
 - `evidence_richness`
 
-The scoring goal is calibrated prioritization, not a fake precision metric. A highly relevant duplicate should not outrank a new paper that fills an important missing method or mechanism gap.
+The scoring goal is calibrated prioritization, not fake precision. A highly relevant duplicate should not outrank a new paper that fills an important missing method or mechanism gap.
 
 See [references/scoring-rubric.md](references/scoring-rubric.md).
 
@@ -196,23 +211,21 @@ See [references/privacy-and-open-source.md](references/privacy-and-open-source.m
 
 ## Smoke Test
 
-Run:
-
 ```bash
 python -X utf8 scripts/smoke_test.py
 ```
 
-The smoke test creates a temporary mini-library, indexes it, infers a profile, builds a gap map, scores two candidates, and renders CSV/HTML plus optional Word/Excel outputs.
+The smoke test creates a temporary mini-library, indexes loose files plus a RIS export and an Obsidian-like vault, infers a profile, builds a gap map, scores two candidates, and renders CSV/HTML plus optional Word/Excel outputs.
 
-## Skill Usage
+## Codex Skill Usage
 
 This repository is also a Codex skill. To install it as a skill, clone it into your Codex skills folder:
 
 ```bash
-git clone https://github.com/<your-user>/local-first-literature.git ~/.codex/skills/local-first-literature
+git clone https://github.com/<your-user>/literature-gap-radar.git ~/.codex/skills/literature-gap-radar
 ```
 
-Then ask Codex to use `$local-first-literature`.
+Then ask Codex to use `$literature-gap-radar`.
 
 ## License
 

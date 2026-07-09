@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smoke test for the local-first literature pipeline."""
+"""Smoke test for the Literature Gap Radar pipeline."""
 
 from __future__ import annotations
 
@@ -37,6 +37,24 @@ def main() -> int:
             "Abstract: A photocatalytic membrane was evaluated for pollutant degradation. Methods include XPS, SEM, EIS, PL, ESR and cycling stability.",
             encoding="utf-8",
         )
+        (local / "zotero-export.ris").write_text(
+            "TY  - JOUR\n"
+            "TI  - Injectable coacervate hydrogel for regenerative immunomodulation\n"
+            "AU  - Example, Ada\n"
+            "PY  - 2025\n"
+            "JO  - Advanced Materials\n"
+            "DO  - 10.9999/example.ris\n"
+            "AB  - A metadata-only record from a Zotero or EndNote RIS export with macrophage polarization and release assays.\n"
+            "ER  -\n",
+            encoding="utf-8",
+        )
+        obsidian = local / "obsidian_vault"
+        obsidian.mkdir()
+        (obsidian / ".obsidian").mkdir()
+        (obsidian / "paper-note.md").write_text(
+            "# Phase separation paper note\n\nDOI: 10.7777/example.note\n\nAbstract: Notes about liquid-liquid phase separation, FRAP, and hydrogel mechanics.",
+            encoding="utf-8",
+        )
 
         index = out / "index.jsonl"
         profile = out / "profile.json"
@@ -44,7 +62,7 @@ def main() -> int:
         candidates = out / "candidates.jsonl"
         scored = out / "scored.jsonl"
 
-        run([sys.executable, "-X", "utf8", str(script), "index", "--roots", str(local), "--output", str(index)])
+        run([sys.executable, "-X", "utf8", str(script), "index", "--roots", str(local), "--output", str(index), "--source-manifest", str(out / "source_manifest.json")])
         run([sys.executable, "-X", "utf8", str(script), "infer-profile", "--index", str(index), "--output", str(profile)])
         run([sys.executable, "-X", "utf8", str(script), "gap-map", "--profile", str(profile), "--output", str(gap)])
 
@@ -77,6 +95,9 @@ def main() -> int:
         run([sys.executable, "-X", "utf8", str(script), "render", "--scored", str(scored), "--output-dir", str(out / "report")])
 
         assert index.exists()
+        indexed = [json.loads(line) for line in index.read_text(encoding="utf-8").splitlines() if line.strip()]
+        assert any(rec.get("source_adapter") == "ris" for rec in indexed)
+        assert (out / "source_manifest.json").exists()
         assert profile.exists()
         assert gap.exists()
         assert scored.exists()

@@ -1,4 +1,4 @@
 interface:
-  display_name: "Local-First Literature"
-  short_description: "Index local papers, find gaps, then scan new literature"
-  default_prompt: "Use $local-first-literature to index my local papers, infer research gaps, deduplicate new search results, and produce a reading-priority report."
+  display_name: "Literature Gap Radar"
+  short_description: "Index local sources, find literature gaps, then scan new papers"
+  default_prompt: "Use $literature-gap-radar to index my local papers, citation-manager exports, and notes, infer research gaps, deduplicate new search results, and produce a reading-priority report."

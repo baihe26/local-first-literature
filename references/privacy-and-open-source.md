@@ -1,6 +1,6 @@
 # Privacy And Open Source Boundary
 
-`local-first-literature` is designed to be open-source friendly. Keep the public skill reusable and keep personal research data out of the repository.
+`literature-gap-radar` is designed to be open-source friendly. Keep the public skill reusable and keep personal research data out of the repository.
 
 ## Safe To Commit
 
@@ -19,11 +19,12 @@
 - private folder paths
 - generated Word/Excel reports for a user's real project
 - API cache files that include private query intent
+- Zotero sqlite databases, EndNote libraries, Obsidian vaults, or citation exports from real users
 
 ## Recommended Layout
 
 ```text
-local-first-literature/
+literature-gap-radar/
   references/research-profile-template.yaml
   scripts/local_first_literature.py
   state/        # ignored
